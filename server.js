@@ -8,7 +8,7 @@ const ed25519 = require('ed25519-hd-key');
 const bip39 = require('bip39');
 require("dotenv").config();
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
