@@ -3,36 +3,39 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Zends Pi Bot</title>
+    <title>Zends Pi Bot - Multi Wallet</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div class="container">
-        <h1>Zends Pi Bot</h1>
+        <h1>Zends Pi Bot (Multi-Wallet)</h1>
         
         <div class="settings-card">
             <h2>Konfigurasi Bot</h2>
-
+            
             <div class="form-group">
-                <label for="senderMnemonic">Mnemonic Wallet Pengirim (Yang akan dikosongkan)</label>
-                <textarea id="senderMnemonic" rows="3" placeholder="Masukkan 24 kata dari wallet yang akan mengirim Pi"></textarea>
+                <label for="senderMnemonics">Mnemonic Wallet Pengirim (Satu per baris)</label>
+                <textarea id="senderMnemonics" rows="6" placeholder="wallet mnemonic 1...
+wallet mnemonic 2...
+wallet mnemonic 3..."></textarea>
+                <small>Masukkan semua wallet yang ingin dikosongkan, pisahkan dengan baris baru (Enter).</small>
             </div>
 
             <div class="form-group">
-                <label for="recipientAddress">Alamat Wallet Penerima (Tujuan dana)</label>
-                <input type="text" id="recipientAddress" placeholder="Masukkan alamat G... tujuan">
+                <label for="recipientAddress">Alamat Wallet Penerima Tunggal (Tujuan dana)</label>
+                <input type="text" id="recipientAddress" placeholder="Masukkan satu alamat G... tujuan untuk semua pengirim">
             </div>
 
             <div class="form-group">
-                <label for="reserveAmount">Jumlah Saldo yang Disisakan</label>
+                <label for="reserveAmount">Jumlah Saldo yang Disisakan (per wallet)</label>
                 <input type="number" id="reserveAmount" value="1.01" step="0.01" min="1">
-                <small>Bot akan mengirim semua saldo di atas jumlah ini. Minimal 1 Pi untuk menjaga wallet tetap aktif.</small>
+                <small>Setiap wallet pengirim akan menyisakan saldo sejumlah ini.</small>
             </div>
         </div>
         
         <div class="controls">
-            <button id="startButton">▶️ Start Bot</button>
-            <button id="stopButton" disabled>⏹️ Stop</button>
+            <button id="startButton">▶️ Start All Bots</button>
+            <button id="stopButton" disabled>⏹️ Stop All</button>
         </div>
 
         <h2>Log Aktivitas</h2>
