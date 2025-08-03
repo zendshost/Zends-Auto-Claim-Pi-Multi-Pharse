@@ -5,7 +5,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const logConsole = document.getElementById('log-console');
     
     // Input Konfigurasi
-    const senderMnemonicInput = document.getElementById('senderMnemonic');
+    const senderMnemonicsInput = document.getElementById('senderMnemonics');
     const recipientAddressInput = document.getElementById('recipientAddress');
     const reserveAmountInput = document.getElementById('reserveAmount');
 
@@ -45,22 +45,27 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateUIState(isRunning) {
         startButton.disabled = isRunning;
         stopButton.disabled = !isRunning;
-        // Kunci semua input saat bot berjalan
-        senderMnemonicInput.disabled = isRunning;
+        senderMnemonicsInput.disabled = isRunning;
         recipientAddressInput.disabled = isRunning;
         reserveAmountInput.disabled = isRunning;
     }
 
     startButton.addEventListener('click', () => {
+        // Ambil mnemonics dari textarea, pisahkan per baris, dan bersihkan
+        const mnemonicsArray = senderMnemonicsInput.value
+            .split('\n')
+            .map(m => m.trim())
+            .filter(m => m.length > 0);
+
         const config = {
-            senderMnemonic: senderMnemonicInput.value.trim(),
+            senderMnemonics: mnemonicsArray, // Kirim sebagai array
             recipientAddress: recipientAddressInput.value.trim(),
             reserveAmount: reserveAmountInput.value.trim()
         };
 
         // Validasi input
-        if (!config.senderMnemonic || !config.recipientAddress) {
-            addLog("❌ Harap isi Mnemonic Pengirim dan Alamat Penerima.", 'error');
+        if (config.senderMnemonics.length === 0 || !config.recipientAddress) {
+            addLog("❌ Harap isi setidaknya satu Mnemonic Pengirim dan Alamat Penerima.", 'error');
             return;
         }
         if (parseFloat(config.reserveAmount) < 1) {
@@ -71,17 +76,16 @@ document.addEventListener('DOMContentLoaded', () => {
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ command: 'start', config }));
             updateUIState(true);
-            addLog('▶️ Perintah START dengan konfigurasi baru dikirim.', 'warn');
+            addLog(`▶️ Perintah START dikirim untuk ${config.senderMnemonics.length} wallet.`, 'warn');
         }
     });
 
     stopButton.addEventListener('click', () => {
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ command: 'stop' }));
-            addLog('⏹️ Perintah STOP dikirim.', 'warn');
+            addLog('⏹️ Perintah STOP dikirim. Semua bot akan berhenti...', 'warn');
         }
     });
 
-    // Mulai koneksi
     connectWebSocket();
 });
