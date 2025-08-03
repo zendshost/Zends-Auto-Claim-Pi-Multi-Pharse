@@ -8,7 +8,6 @@ const ed25519 = require('ed25519-hd-key');
 const bip39 = require('bip39');
 require("dotenv").config();
 
-// --- Konfigurasi & Inisialisasi ---
 const PORT = process.env.PORT || 3000;
 const app = express();
 const server = http.createServer(app);
@@ -16,12 +15,12 @@ const wss = new WebSocketServer({ server });
 
 app.use(express.static(path.join(__dirname, 'public')));
 
+// --- State Global ---
 let isRunning = false;
-let currentConfig = {};
 let clientWs = null;
 
+// --- Fungsi Helper ---
 const logToBrowser = (message, level = 'info') => {
-    // console.log(message); // Uncomment for server-side debugging
     if (clientWs && clientWs.readyState === clientWs.OPEN) {
         clientWs.send(JSON.stringify({ type: 'log', level, message }));
     }
@@ -37,23 +36,40 @@ async function getKeypairFromMnemonic(mnemonic) {
     return StellarSdk.Keypair.fromRawEd25519Seed(key);
 }
 
-// --- Logika Utama "Auto-Drain" ---
-async function runSenderLogic(config) {
-    if (!isRunning) return;
+// --- Logika Inti Bot ---
 
-    logToBrowser("🚀 Memulai inisialisasi bot auto-drain...");
+/**
+ * Master controller yang memulai worker untuk setiap mnemonic.
+ * @param {object} config - Konfigurasi dari UI.
+ */
+function startAllWorkers(config) {
+    logToBrowser(`🚀 Memulai proses untuk ${config.senderMnemonics.length} wallet...`);
+    
+    config.senderMnemonics.forEach((mnemonic, index) => {
+        const workerConfig = {
+            id: index + 1,
+            mnemonic: mnemonic,
+            recipientAddress: config.recipientAddress,
+            reserveAmount: parseFloat(config.reserveAmount) || 1.01
+        };
+        // Jalankan setiap worker secara paralel. Jangan `await` di sini.
+        runDrainWorker(workerConfig);
+    });
+}
 
+/**
+ * Worker yang menangani logika drain untuk SATU wallet.
+ * @param {object} workerConfig - Konfigurasi spesifik untuk worker ini.
+ */
+async function runDrainWorker(workerConfig) {
+    const workerId = `[Wallet #${workerConfig.id}]`;
+    
     try {
         const piServer = new StellarSdk.Server('https://apimainnet.vercel.app');
-        const senderKeypair = await getKeypairFromMnemonic(config.senderMnemonic);
+        const senderKeypair = await getKeypairFromMnemonic(workerConfig.mnemonic);
         const senderPublic = senderKeypair.publicKey();
-        const reserveAmount = parseFloat(config.reserveAmount) || 1.01; // Default 1.01 jika tidak valid
 
-        logToBrowser(`🔑 Alamat Pengirim: ${senderPublic}`);
-        logToBrowser(`🎯 Alamat Penerima: ${config.recipientAddress}`);
-        logToBrowser(`💰 Saldo Disisakan: ${reserveAmount} Pi`);
-        logToBrowser("✅ Inisialisasi selesai. Memulai loop pemeriksaan saldo...");
-        logToBrowser("======================================================");
+        logToBrowser(`${workerId} 🔑 Pengirim: ${senderPublic.substring(0, 10)}...`);
 
         let lastBalanceLogTime = 0;
 
@@ -63,26 +79,27 @@ async function runSenderLogic(config) {
                 const piBalance = account.balances.find(b => b.asset_type === 'native');
                 const balance = parseFloat(piBalance.balance);
 
-                const amountToSend = balance - reserveAmount;
+                const amountToSend = balance - workerConfig.reserveAmount;
 
                 if (amountToSend <= 0) {
                     const now = Date.now();
-                    if (now - lastBalanceLogTime > 1) { // Log status hanya sekali per 1 ms
-                        logToBrowser(`⚠️ Saldo tidak cukup (${balance} Pi). Memeriksa tanpa henti...`, 'warn');
+                    if (now - lastBalanceLogTime > 1) { // Kurangi spam log saat saldo kosong
+                        logToBrowser(`${workerId} ⚠️ Saldo tidak cukup (${balance} Pi).`, 'warn');
                         lastBalanceLogTime = now;
                     }
-                    continue; // Loop tanpa jeda
+                    await new Promise(resolve => setTimeout(resolve, 1)); // Jeda sangat singkat untuk efisiensi
+                    continue;
                 }
 
                 const formattedAmount = amountToSend.toFixed(7);
-                logToBrowser(`➡️  Saldo Terdeteksi! Mengirim ${formattedAmount} Pi...`, 'success');
+                logToBrowser(`${workerId} ➡️  Saldo Terdeteksi! Mengirim ${formattedAmount} Pi...`, 'success');
 
                 const tx = new StellarSdk.TransactionBuilder(account, {
                     fee: await piServer.fetchBaseFee(),
                     networkPassphrase: 'Pi Network',
                 })
                 .addOperation(StellarSdk.Operation.payment({
-                    destination: config.recipientAddress,
+                    destination: workerConfig.recipientAddress,
                     asset: StellarSdk.Asset.native(),
                     amount: formattedAmount,
                 }))
@@ -91,29 +108,22 @@ async function runSenderLogic(config) {
 
                 tx.sign(senderKeypair);
                 const result = await piServer.submitTransaction(tx);
-
-                logToBrowser(`✅ Transaksi Terkirim! Hash: ${result.hash}`);
-                logToBrowser(`🔗 Link: https://blockexplorer.minepi.com/mainnet/transactions/${result.hash}`);
-                logToBrowser("------------------------------------------------------");
+                logToBrowser(`${workerId} ✅ Transaksi Terkirim! Hash: ${result.hash.substring(0, 15)}...`);
 
             } catch (e) {
                 const errorMessage = e.response?.data?.extras?.result_codes?.transaction || e.message || "Error tidak diketahui";
-                logToBrowser(`❌ Terjadi Error: ${errorMessage}`, 'error');
-                await new Promise(resolve => setTimeout(resolve, 10)); // Jeda 10 ms saat ada error
+                logToBrowser(`${workerId} ❌ Error: ${errorMessage}`, 'error');
+                await new Promise(resolve => setTimeout(resolve, 3000)); // Jeda lebih lama saat ada error
             }
         }
     } catch (initError) {
-        logToBrowser(`❌ Gagal Inisialisasi: ${initError.message}`, 'error');
+        logToBrowser(`${workerId} ❌ Gagal Inisialisasi: ${initError.message}`, 'error');
     }
-
-    logToBrowser("🛑 Proses dihentikan.");
-    if (clientWs) clientWs.send(JSON.stringify({ type: 'status', running: false }));
-    isRunning = false;
 }
 
 // --- Manajemen Koneksi WebSocket ---
 wss.on('connection', (ws) => {
-    logToBrowser('🖥️ Server terhubung.');
+    logToBrowser('🖥️ Client terhubung.');
     clientWs = ws;
     ws.send(JSON.stringify({ type: 'status', running: isRunning }));
 
@@ -123,11 +133,15 @@ wss.on('connection', (ws) => {
             if (data.command === 'start') {
                 if (!isRunning) {
                     isRunning = true;
-                    currentConfig = data.config; // Simpan konfigurasi dari UI
-                    runSenderLogic(currentConfig); // Jalankan bot dengan konfigurasi tersebut
+                    startAllWorkers(data.config); // Panggil master controller
                 }
             } else if (data.command === 'stop') {
-                isRunning = false;
+                if (isRunning) {
+                    isRunning = false; // Set flag untuk menghentikan semua loop
+                    logToBrowser("🛑 Perintah STOP diterima. Semua worker akan berhenti setelah operasi saat ini selesai.");
+                    // Kirim status kembali ke UI agar tombol menjadi aktif lagi
+                    ws.send(JSON.stringify({ type: 'status', running: false }));
+                }
             }
         } catch (e) {
             logToBrowser(`Error memproses pesan client: ${e.message}`, 'error');
