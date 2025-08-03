@@ -37,11 +37,6 @@ async function getKeypairFromMnemonic(mnemonic) {
 }
 
 // --- Logika Inti Bot ---
-
-/**
- * Master controller yang memulai worker untuk setiap mnemonic.
- * @param {object} config - Konfigurasi dari UI.
- */
 function startAllWorkers(config) {
     logToBrowser(`🚀 Memulai proses untuk ${config.senderMnemonics.length} wallet...`);
     
@@ -52,15 +47,10 @@ function startAllWorkers(config) {
             recipientAddress: config.recipientAddress,
             reserveAmount: parseFloat(config.reserveAmount) || 1.01
         };
-        // Jalankan setiap worker secara paralel. Jangan `await` di sini.
         runDrainWorker(workerConfig);
     });
 }
 
-/**
- * Worker yang menangani logika drain untuk SATU wallet.
- * @param {object} workerConfig - Konfigurasi spesifik untuk worker ini.
- */
 async function runDrainWorker(workerConfig) {
     const workerId = `[Wallet #${workerConfig.id}]`;
     
@@ -78,43 +68,43 @@ async function runDrainWorker(workerConfig) {
                 const account = await piServer.loadAccount(senderPublic);
                 const piBalance = account.balances.find(b => b.asset_type === 'native');
                 const balance = parseFloat(piBalance.balance);
-
                 const amountToSend = balance - workerConfig.reserveAmount;
 
-                if (amountToSend <= 0) {
+                if (amountToSend > 0) {
+                    const formattedAmount = amountToSend.toFixed(7);
+                    logToBrowser(`${workerId} ➡️  Saldo Terdeteksi! Mengirim ${formattedAmount} Pi...`, 'success');
+                    const tx = new StellarSdk.TransactionBuilder(account, {
+                        fee: await piServer.fetchBaseFee(),
+                        networkPassphrase: 'Pi Network',
+                    })
+                    .addOperation(StellarSdk.Operation.payment({
+                        destination: workerConfig.recipientAddress,
+                        asset: StellarSdk.Asset.native(),
+                        amount: formattedAmount,
+                    }))
+                    .setTimeout(30)
+                    .build();
+
+                    tx.sign(senderKeypair);
+                    const result = await piServer.submitTransaction(tx);
+                    logToBrowser(`${workerId} ✅ Transaksi Terkirim! Hash: ${result.hash.substring(0, 15)}...`);
+                } else {
                     const now = Date.now();
-                    if (now - lastBalanceLogTime > 1) { // Kurangi spam log saat saldo kosong
+                    if (now - lastBalanceLogTime > 1000) {
                         logToBrowser(`${workerId} ⚠️ Saldo tidak cukup (${balance} Pi).`, 'warn');
                         lastBalanceLogTime = now;
                     }
-                    await new Promise(resolve => setTimeout(resolve, 1)); // Jeda sangat singkat untuk efisiensi
-                    continue;
                 }
-
-                const formattedAmount = amountToSend.toFixed(7);
-                logToBrowser(`${workerId} ➡️  Saldo Terdeteksi! Mengirim ${formattedAmount} Pi...`, 'success');
-
-                const tx = new StellarSdk.TransactionBuilder(account, {
-                    fee: await piServer.fetchBaseFee(),
-                    networkPassphrase: 'Pi Network',
-                })
-                .addOperation(StellarSdk.Operation.payment({
-                    destination: workerConfig.recipientAddress,
-                    asset: StellarSdk.Asset.native(),
-                    amount: formattedAmount,
-                }))
-                .setTimeout(30)
-                .build();
-
-                tx.sign(senderKeypair);
-                const result = await piServer.submitTransaction(tx);
-                logToBrowser(`${workerId} ✅ Transaksi Terkirim! Hash: ${result.hash.substring(0, 15)}...`);
-
             } catch (e) {
                 const errorMessage = e.response?.data?.extras?.result_codes?.transaction || e.message || "Error tidak diketahui";
                 logToBrowser(`${workerId} ❌ Error: ${errorMessage}`, 'error');
-                await new Promise(resolve => setTimeout(resolve, 3000)); // Jeda lebih lama saat ada error
+                await new Promise(resolve => setTimeout(resolve, 5000)); // Jeda 5 detik saat error
+                continue; 
             }
+            
+            // Jeda acak untuk mengurangi beban serentak pada server API
+            const randomDelay = Math.floor(Math.random() * 750) + 50; // Jeda 50ms - 800ms
+            await new Promise(resolve => setTimeout(resolve, randomDelay));
         }
     } catch (initError) {
         logToBrowser(`${workerId} ❌ Gagal Inisialisasi: ${initError.message}`, 'error');
@@ -133,13 +123,12 @@ wss.on('connection', (ws) => {
             if (data.command === 'start') {
                 if (!isRunning) {
                     isRunning = true;
-                    startAllWorkers(data.config); // Panggil master controller
+                    startAllWorkers(data.config);
                 }
             } else if (data.command === 'stop') {
                 if (isRunning) {
-                    isRunning = false; // Set flag untuk menghentikan semua loop
-                    logToBrowser("🛑 Perintah STOP diterima. Semua worker akan berhenti setelah operasi saat ini selesai.");
-                    // Kirim status kembali ke UI agar tombol menjadi aktif lagi
+                    isRunning = false;
+                    logToBrowser("🛑 Perintah STOP diterima. Semua worker akan berhenti...");
                     ws.send(JSON.stringify({ type: 'status', running: false }));
                 }
             }
